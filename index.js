@@ -1,6 +1,5 @@
 'use strict'
 
-const deepEquals = require('deep-equal')
 const PassThrough = require('readable-stream').PassThrough
 const pump = require('pump')
 const subdown = require('subleveldown')
@@ -18,11 +17,20 @@ const PREFIX = {
   index: 'x'
 }
 
-module.exports = exports = function createIndexedDB (opts) {
+module.exports = exports = createIndexedDB
+exports.SEPARATOR = SEPARATOR
+exports.upToDateStream = upToDateStream
+
+function createIndexedDB (opts) {
   const feed = opts.feed
+  if (!feed.count) {
+    throw new Error('use mafintosh/changes-feed or mvayngrib/changes-feed with "count" method')
+  }
+
   // const worker = opts.worker
   const top = opts.db
   const idProp = opts.primaryKey || 'key'
+  const filter = opts.filter || alwaysTrue
   const stateReducer = opts.reduce || mergeReducer
   const sep = opts.separator || SEPARATOR
   const indexReducers = {}
@@ -48,6 +56,8 @@ module.exports = exports = function createIndexedDB (opts) {
 
   function processChange (change, cb) {
     change = change.value
+    if (!filter(change)) return cb()
+
     const rowKey = change[idProp]
     // ignore changes that we can't process
     if (rowKey == null) return cb()
@@ -229,9 +239,6 @@ module.exports = exports = function createIndexedDB (opts) {
   }
 }
 
-exports.SEPARATOR = SEPARATOR
-exports.upToDateStream = upToDateStream
-
 function upToDateStream (db, processor, opts) {
   opts = opts || {}
   var tr = new PassThrough({ objectMode: true })
@@ -244,38 +251,13 @@ function upToDateStream (db, processor, opts) {
   return tr
 }
 
-function pick (obj, props) {
-  const subset = {}
-  props.forEach(prop => {
-    if (prop in obj) {
-      subset[prop] = obj[prop]
-    }
-  })
-
-  return subset
-}
-
-function omit (obj) {
-  const subset = {}
-  const props = [].slice.call(arguments, 1)
-  for (var p in obj) {
-    if (props.indexOf(p) === -1) {
-      subset[p] = obj[p]
-    }
-  }
-
-  return subset
-}
-
-function getter (prop) {
-  return function (obj) {
-    obj[prop]
-  }
-}
-
 function NotFoundErr () {
   const err = new Error('NotFoundErr')
   err.notFound = true
   err.name = err.type = 'notFound'
   return err
+}
+
+function alwaysTrue () {
+  return true
 }
