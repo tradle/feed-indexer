@@ -10,6 +10,7 @@
   "license": "MIT",
   "dependencies": {
     "level-change-processor": "mvayngrib/level-change-processor",
+    "level-errors": "^1.0.4",
     "level-live-stream": "^1.4.11",
     "level-option-wrap": "^1.1.0",
     "pump": "^1.0.1",

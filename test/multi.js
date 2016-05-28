@@ -1,22 +1,13 @@
 var test = require('tape')
-var sub = require('subleveldown')
-var memdown = require('memdown')
-var levelup = require('levelup')
 var changes = require('changes-feed')
-var level = function (path, opts) {
-  opts = opts || {}
-  opts.valueEncoding = 'json'
-  opts.db = memdown
-  return levelup(path, opts)
-}
-
+var nextDB = require('./helpers').nextDB
 var indexer = require('..')
 
 test('multi', function(t) {
   t.plan(4)
 
-  var db = level('db')
-  var feed = changes(level('feed'))
+  var db = nextDB()
+  var feed = changes(nextDB())
   var indexed = indexer({
     primaryKey: 'id',
     db: db,

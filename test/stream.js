@@ -1,22 +1,13 @@
 var test = require('tape')
-var sub = require('subleveldown')
-var memdown = require('memdown')
-var levelup = require('levelup')
 var changes = require('changes-feed')
-var level = function (path, opts) {
-  opts = opts || {}
-  opts.valueEncoding = 'json'
-  opts.db = memdown
-  return levelup(path, opts)
-}
-
+var nextDB = require('./helpers').nextDB
 var indexer = require('..')
 
 test('stream', function(t) {
   t.plan(2)
 
-  var db = level('db')
-  var feed = changes(level('feed'))
+  var db = nextDB()
+  var feed = changes(nextDB())
   var indexed = indexer({
     primaryKey: 'id',
     db: db,
@@ -38,7 +29,8 @@ test('stream', function(t) {
 
   byLength.createReadStream({
     start: 10,
-    end: 20
+    end: 20,
+    keys: false
   })
   .on('data', function(data) {
     t.deepEqual(data, post)
@@ -46,7 +38,8 @@ test('stream', function(t) {
 
   byLength.createReadStream({
     start: 15,
-    end: 20
+    end: 20,
+    keys: false
   })
   .on('data', t.fail)
   .on('end', t.pass)

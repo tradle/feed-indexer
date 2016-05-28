@@ -1,5 +1,6 @@
 'use strict'
 
+const EventEmitter = require('events').EventEmitter
 const PassThrough = require('readable-stream').PassThrough
 const pump = require('pump')
 const subdown = require('subleveldown')
@@ -7,6 +8,7 @@ const collect = require('stream-collector')
 const changeProcessor = require('level-change-processor')
 const LiveStream = require('level-live-stream')
 const wrap = require('level-option-wrap')
+const errors = require('level-errors')
 const through = require('through2')
 const extend = require('xtend/mutable')
 const clone = require('xtend')
@@ -19,46 +21,45 @@ const PREFIX = {
 
 module.exports = exports = createIndexedDB
 exports.SEPARATOR = SEPARATOR
-exports.upToDateStream = upToDateStream
+exports.merge = merge
 
 function createIndexedDB (opts) {
   const feed = opts.feed
   if (!feed.count) {
-    throw new Error('use mafintosh/changes-feed or mvayngrib/changes-feed with "count" method')
+    throw new Error('feed.count method not found, use mafintosh/changes-feed or mvayngrib/changes-feed')
   }
 
-  // const worker = opts.worker
   const top = opts.db
-  const idProp = opts.primaryKey || 'key'
+  const primaryKey = opts.primaryKey || 'key'
   const filter = opts.filter || alwaysTrue
   const stateReducer = opts.reduce || mergeReducer
   const sep = opts.separator || SEPARATOR
   const indexReducers = {}
+  const indexEmitters = {}
 
   const counter = subdown(top, '~')
-  const db = subdown(top, 'd', { valueEncoding: top.options.valueEncoding, separator: sep })
+  const dbOpts = { valueEncoding: top.options.valueEncoding, separator: sep }
+  const db = subdown(top, 'd', dbOpts)
   LiveStream.install(db)
 
-  const view = subdown(db, PREFIX.view, { valueEncoding: top.options.valueEncoding, separator: sep })
-  const index = subdown(db, PREFIX.index, { separator: sep, valueEncoding: top.options.valueEncoding })
+  const view = subdown(db, PREFIX.view, dbOpts)
+  const index = subdown(db, PREFIX.index, dbOpts)
 
   const processor = db.processor = changeProcessor({
     feed: feed,
     db: counter,
-    worker: processChange
+    worker: worker
   })
 
-  function mergeReducer (state, change) {
-    state = clone(state || {}, change || {})
-    // delete state[idProp]
-    return state
-  }
+  processor.setMaxListeners(0)
 
-  function processChange (change, cb) {
+  const emitter = new EventEmitter()
+
+  function worker (change, cb) {
     change = change.value
     if (!filter(change)) return cb()
 
-    const rowKey = change[idProp]
+    const rowKey = getPrimaryKey(change, primaryKey)
     // ignore changes that we can't process
     if (rowKey == null) return cb()
 
@@ -67,8 +68,12 @@ function createIndexedDB (opts) {
     var newState
     var prevIndex
     view.get(rowKey, function (err, state) {
-      newState = stateReducer(state, change)
-      next()
+      stateReducer(state, change, function (err, _newState) {
+        if (err) return cb(err)
+
+        newState = _newState
+        next()
+      })
     })
 
     index.get(rowIndexKey, function (err, indexMap) {
@@ -88,7 +93,8 @@ function createIndexedDB (opts) {
 
       const newIndex = {}
       for (let key in indexReducers) {
-        newIndex[key] = indexReducers[key](newState)
+        let iVal = indexReducers[key](newState)
+        if (iVal != null) newIndex[key] = iVal
       }
 
       const put = Object.keys(newIndex)
@@ -128,7 +134,17 @@ function createIndexedDB (opts) {
         value: newState
       })
 
-      db.batch(batch, cb)
+      db.batch(batch, function (err) {
+        if (err) return cb(err)
+
+        cb()
+
+        // announce changes
+        emitter.emit('change', change, newState)
+        for (let prop in newIndex) {
+          indexEmitters[prop].emit('change', change, newIndex[prop])
+        }
+      })
     }
   }
 
@@ -138,6 +154,8 @@ function createIndexedDB (opts) {
 
   function createIndexStream (prop, opts) {
     opts = opts || {}
+    if (typeof opts === 'string') opts = { eq: opts, keys: false }
+
     if ('eq' in opts) {
       opts.lte = opts.gte = opts.eq
     }
@@ -154,12 +172,19 @@ function createIndexedDB (opts) {
       }
     }))
 
+    const noKeys = opts.keys === false
     opts.keys = opts.values = true
     return pump(
       upToDateStream(db, processor, opts),
       through.obj(function (data, enc, cb) {
-        if (data.type === 'del') cb()
-        else getOldRow(data.value, cb)
+        if (data.type === 'del') return cb()
+
+        getOldRow(data.value, function (err, val) {
+          if (err) return cb(err)
+          if (!noKeys) val = { key: data.key, value: val }
+
+          cb(null, val)
+        })
       })
     )
   }
@@ -172,15 +197,15 @@ function createIndexedDB (opts) {
     view.get(key, cb)
   }
 
-  function indexBy (prop, reduce) {
-    function find (opts, cb) {
-      if (typeof opts !== 'object') {
-        opts = { eq: opts }
-      }
+  function createIndex (prop, reduce) {
+    function createReadStream (opts) {
+      return createIndexStream(prop, opts)
+    }
 
-      collect(createIndexStream(prop, opts), function (err, results) {
+    function find (opts, cb) {
+      collect(createReadStream(opts), function (err, results) {
         if (err) return cb(err)
-        if (!results.length) return NotFoundErr()
+        if (!results.length) return cb(new errors.NotFoundError())
         cb(null, results)
       })
     }
@@ -193,21 +218,22 @@ function createIndexedDB (opts) {
     }
 
     indexReducers[prop] = reduce || defaultIndexReducer(prop)
-    return {
+    indexEmitters[prop] = new EventEmitter()
+    return extend(indexEmitters[prop], {
       find: find,
       findOne: findOne,
-      createReadStream: createIndexStream.bind(null, prop)
+      createReadStream: createReadStream
+    })
+  }
+
+  function defaultIndexReducer (prop) {
+    return function indexReducer (state) {
+      return state[prop] + sep + getPrimaryKey(state, primaryKey)
     }
   }
 
-  // function getIndexKey (state, key) {
-  //   return key + sep + indexReducers[key](newState)
-  // }
-
-  function defaultIndexReducer (prop) {
-    return function indexReducer (val) {
-      return val[prop] + sep + val[idProp]
-    }
+  function getPrimaryKey (obj, propOrFn) {
+    return typeof propOrFn === 'function' ? propOrFn(obj) : obj[propOrFn]
   }
 
   function prefixKeys (batch, prefix) {
@@ -227,21 +253,34 @@ function createIndexedDB (opts) {
     return SEPARATOR + prefix + SEPARATOR + key
   }
 
-  return {
+  return extend(emitter, {
     separator: sep,
-    by: indexBy,
+    by: createIndex,
     get: function (key, opts, cb) {
       processor.onLive(() => view.get(key, opts, cb))
     },
     createReadStream: function (opts) {
-      return upToDateStream(view, processor, opts)
+      opts = opts || {}
+      extend(opts, wrap(opts, {
+        gt: function (x) {
+          return prefixKey(x || '', PREFIX.view)
+        },
+        lt: function (x) {
+          return prefixKey(x || '', PREFIX.view) + '\xff'
+        }
+      }))
+
+      return pump(
+        upToDateStream(db, processor, opts),
+        unprefixer(PREFIX.view, opts)
+      )
     }
-  }
+  })
 }
 
 function upToDateStream (db, processor, opts) {
   opts = opts || {}
-  var tr = new PassThrough({ objectMode: true })
+  const tr = new PassThrough({ objectMode: true })
   processor.onLive(function () {
     const method = opts.live ? 'liveStream' : 'createReadStream'
     const source = db[method].call(db, opts)
@@ -251,13 +290,27 @@ function upToDateStream (db, processor, opts) {
   return tr
 }
 
-function NotFoundErr () {
-  const err = new Error('NotFoundErr')
-  err.notFound = true
-  err.name = err.type = 'notFound'
-  return err
-}
-
 function alwaysTrue () {
   return true
+}
+
+function unprefixer (prefix, opts) {
+  return through.obj(function (data, enc, cb) {
+    if (opts.keys === false) return cb(null, data)
+    if (opts.values === false) return cb(null, data.slice(prefix.length))
+
+    cb(null, {
+      key: data.key.slice(prefix.length),
+      value: data.value
+    })
+  })
+}
+
+function mergeReducer (state, change, cb) {
+  // delete state[primaryKey]
+  cb(null, merge(state, change))
+}
+
+function merge (state, change) {
+  return clone(state || {}, change || {})
 }
