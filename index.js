@@ -12,7 +12,7 @@ const extend = require('xtend/mutable')
 const END = new Buffer([0xff])
 const SEPARATOR = '!'
 const PREFIX = {
-  main: 'm',
+  view: 'v',
   index: 'x'
 }
 
@@ -20,85 +20,106 @@ module.exports = exports = function createIndexedDB (opts) {
   const feed = opts.feed
   const worker = opts.worker
   const top = opts.db
+  const idProp = opts.id
+  const reduce = opts.reduce
 
   const counter = subdown(top, '~')
   const db = subdown(top, 'd', { valueEncoding: top.options.valueEncoding })
   LiveStream.install(db)
 
-  const main = subdown(db, PREFIX.main, {
+  const view = subdown(db, PREFIX.view, {
     valueEncoding: db.options.valueEncoding,
     separator: SEPARATOR
   })
 
   const index = subdown(db, PREFIX.index, { separator: SEPARATOR })
+
   const processor = db.processor = changeProcessor({
     feed: feed,
     db: counter,
-    worker: function (change, cb) {
-      worker(change, function (err, mainRow, indices, oncommit) {
-        if (err || !mainRow) return cb(err)
-
-        const batch = indices ? indices.map(row => {
-          const docId = row.id || mainRow.key
-          var key = getIndexKey(row.key, row.value, docId)
-          key = prefixKey(key, PREFIX.index)
-          return {
-            type: row.type || mainRow.type,
-            key: key,
-            value: docId
-          }
-        }) : []
-
-        batch.push({
-          type: mainRow.type || 'put',
-          key: prefixKey(mainRow.key, PREFIX.main),
-          value: mainRow.value
-        })
-
-        db.batch(batch, function (err) {
-          if (oncommit) oncommit(err)
-
-          cb(err)
-        })
-      })
-    }
+    worker: processChange
   })
 
   // fix range
-  var rangers = {
-    main: getRanger(PREFIX.main),
+  const rangers = {
+    view: getRanger(PREFIX.view),
     index: getRanger(PREFIX.index)
   }
 
-  var mainAPI = {
-    createReadStream: function (opts) {
-      extend(opts, wrap(opts, rangers.main))
-      return pump(
-        upToDateStream(db, processor, opts),
-        unprefixer(opts, PREFIX.main)
-      )
-    },
-    get: getRow,
-    raw: main
-    // raw: {
-    //   get: function (key, opts, cb) {
-
-    //   },
-    //   createReadStream: function (opts, cb) {
-    //     extend(opts, wrap(opts, rangers.main))
-    //     return pump(
-    //       db.createReadStream(opts),
-    //       unprefixer(opts, PREFIX.main)
-    //     )
-    //   }
-    // }
-  }
-
-  var indexAPI = {
+  const indexAPI = {
     by: createIndexStream,
     raw: index
   }
 
+  const viewAPI = {
+    createReadStream: function (opts) {
+      extend(opts, wrap(opts, rangers.view))
+      return pump(
+        upToDateStream(db, processor, opts),
+        unprefixer(opts, PREFIX.view)
+      )
+    },
+    get: getRow,
+    raw: view
+  }
+
+  function processChange (change, cb) {
+    const key = change[idProp]
+    // ignore changes that we can't process
+    if (!key) return cb()
+
+    worker(change, function (err, update) {
+      if (err) return cb(err)
+
+      const rowKey = change[idProp]
+      const viewRow = {
+        type: 'put',
+        key: update.key || rowKey,
+        value: update.value || omit(change, idProp)
+      }
+
+      let batch = []
+      const rowIndex = update.index
+      if (rowIndex) {
+        batch = batch.concat(Object.keys(rowIndex).map(function (key) {
+          return {
+            type: 'put',
+            key: [key, rowIndex[key], rowKey]
+          }
+        }))
+      }
+
+      const rowIndexKey = getRowIndexKey(rowKey)
+      index.get(rowIndexKey, function (err, prev) {
+        if (prev) {
+          batch = batch.concat(Object.keys(prev).map(key => {
+            return {
+              type: 'del',
+              key: [key, prev[key], rowKey]
+            }
+          }))
+        }
+
+        if (batch.length) {
+          // save latest index
+          batch.push({
+            type: 'put',
+            key: rowIndexKey
+          })
+        }
+      })
+
+      db.batch(batch, function (err) {
+        if (update.cb) update.cb(err)
+
+        cb(err)
+      })
+    })
+  }
+
+  function getRowIndexKey (rowKey) {
+    return SEPARATOR + rowKey
+  }
 
   function createIndexStream (prop, value, opts) {
     const prefix = prefixKey(getIndexKey(prop, value), PREFIX.index)
@@ -117,12 +138,12 @@ module.exports = exports = function createIndexedDB (opts) {
 
   function getRow (key, opts, cb) {
     processor.onLive(function () {
-      db.get(prefixKey(key, PREFIX.main), opts, cb)
+      db.get(prefixKey(key, PREFIX.view), opts, cb)
     })
   }
 
   return {
-    main: mainAPI,
+    view: viewAPI,
     index: indexAPI
   }
 }
@@ -310,6 +331,18 @@ function pick (obj, props) {
       subset[prop] = obj[prop]
     }
   })
+
+  return subset
+}
+
+function omit (obj) {
+  const subset = {}
+  const props = [].slice.call(arguments, 1)
+  for (var p in obj) {
+    if (props.indexOf(p) === -1) {
+      subset[p] = obj[p]
+    }
+  }
 
   return subset
 }

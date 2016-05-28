@@ -84,7 +84,7 @@ var users = require('./users').slice(0, 10).map(function (u, i) {
 // msgDB.index.by('status', 'sent', { live: true }).on('data', console.log)
 // msgDB.main.createReadStream({ live: true }).on('data', console.log)
 // userDB.main.createReadStream({ live: true }).on('data', console.log)
-userDB.by('fingerprint', users[0].pubkeys[0].fingerprint, { live: true }).on('data', console.log)
+userDB.index.by('fingerprint', users[0].pubkeys[0].fingerprint, { live: true }).on('data', console.log)
 
 setTimeout(function () {
   users.concat(msgs).forEach(function (item) {
