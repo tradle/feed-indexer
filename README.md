@@ -1,8 +1,19 @@
+# feed-indexer
+
+Based on [level-secondary](https://github.com/juliangruber/level-secondary) and [changes-index](https://github.com/substack/changes-index). 
+
+Borrows API style from level-secondary, but unlike level-secondary, builds indexes on a feed rather than a database.
+
+Borrows some index-processing logic from changes-index, but unlike changes-index, here you write to the feed directly, and can define custom indexing rules.
+
+# Usage
+
+```js
 const changes = require('changes-feed')
 const levelup = require('levelup')
 const memdown = require('memdown')
 const collect = require('stream-collector')
-const indexer = require('./')
+const indexer = require('feed-indexer')
 const level = function (path, opts) {
   opts = opts || {}
   if (!opts.db) opts.db = memdown
@@ -76,3 +87,4 @@ collect(byFirstName.createReadStream({ gte: 'Joe' }), function (err, results) {
     })
   })
 })
+```
