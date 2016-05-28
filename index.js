@@ -23,7 +23,7 @@ module.exports = exports = function createIndexedDB (opts) {
   // const worker = opts.worker
   const top = opts.db
   const idProp = opts.primaryKey || 'key'
-  const reduce = opts.reduce || mergeReducer
+  const stateReducer = opts.reduce || mergeReducer
   const sep = opts.separator || SEPARATOR
   const indexReducers = {}
 
@@ -57,7 +57,7 @@ module.exports = exports = function createIndexedDB (opts) {
     var newState
     var prevIndex
     view.get(rowKey, function (err, state) {
-      newState = reduce(state, change)
+      newState = stateReducer(state, change)
       next()
     })
 
@@ -83,13 +83,24 @@ module.exports = exports = function createIndexedDB (opts) {
 
       const put = Object.keys(newIndex)
         .map(key => {
-          return {
-            type: 'put',
-            key: key + sep + newIndex[key],
-            // key: defaultIndexReducer(key, newState[key], rowKey),
-            value: rowKey
-          }
+          // support multiple generated indices for one prop
+          // e.g. an identity might have multiple keys and want
+          // multiple indices for the `fingerprint` property
+          let vals = newIndex[key]
+          vals = Array.isArray(vals) ? vals : [vals]
+          return vals.map(function (val) {
+            return {
+              type: 'put',
+              key: key + sep + val,
+              // key: defaultIndexReducer(key, newState[key], rowKey),
+              value: rowKey
+            }
+          })
         })
+        // flatten
+        .reduce(function (flat, next) {
+          return flat.concat(next)
+        }, [])
 
       const indexBatch = del.concat(put)
       indexBatch.push({
@@ -175,9 +186,9 @@ module.exports = exports = function createIndexedDB (opts) {
     }
   }
 
-  function getIndexKey (state, key) {
-    return key + sep + indexReducers[key](newState)
-  }
+  // function getIndexKey (state, key) {
+  //   return key + sep + indexReducers[key](newState)
+  // }
 
   function defaultIndexReducer (prop) {
     return function indexReducer (val) {
