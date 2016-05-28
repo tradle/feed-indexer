@@ -12,7 +12,7 @@ var level = function (path, opts) {
 
 var indexer = require('..')
 
-test('get', function(t) {
+test('stream', function(t) {
   t.plan(2)
 
   var db = level('db')

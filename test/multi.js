@@ -12,7 +12,7 @@ var level = function (path, opts) {
 
 var indexer = require('..')
 
-test('find', function(t) {
+test('multi', function(t) {
   t.plan(4)
 
   var db = level('db')

@@ -3,8 +3,8 @@ const extend = require('xtend')
 const changes = require('changes-feed')
 const levelup = require('levelup')
 const memdown = require('memdown')
-const hydra = require('hydration')()
-const indexer = require('./indexer')
+const collect = require('stream-collector')
+const indexer = require('./')
 const level = function (path, opts) {
   opts = opts || {}
   if (!opts.db) opts.db = memdown
@@ -22,63 +22,56 @@ const indexedDB = indexer({
 
 const byFirstName = indexedDB.by('firstName')
 const byLastName = indexedDB.by('lastName')
-const byKeys = indexedDB.by('fingerprint', function (val) {
-  return val.firstName + val.lastName + '!' + val.id
-})
-
-// setTimeout(function () {
-  // db.createReadStream().on('data', console.log)
-  // indexedDB.createReadStream().on('data', console.log)
-
-// console.log('eq Mark1')
-// byFirstName.createReadStream({ eq: 'Mark1', live: true }).on('data', console.log)
-
-// console.log('[Bill, Ted]')
-// byFirstName.createReadStream({ gte: 'Bill', lte: 'Ted', live: true }).on('data', console.log)
-
-// byFirstName.createReadStream({ gt: 'Mark1', live: true }).on('data', console.log)
-// }, 100)
-
-byFirstName.createReadStream({ gte: 'Ted', live: true }).on('data', console.log)
-
-feed.append({
-  id: 'mv1',
-  firstName: 'Mark1',
-  lastName: 'Markaa'
+const byFingerprint = indexedDB.by('fingerprint', function (val) {
+  return val.keys.map(function (key) {
+    return key.fingerprint + indexedDB.separator + val.id
+  })
 })
 
 feed.append({
-  id: 'mv2',
-  firstName: 'Mark2',
-  lastName: 'Markaa'
+  id: 'pr',
+  firstName: 'Patrick',
+  lastName: 'Rothfuss',
+  keys: [
+    { fingerprint: 'abc' },
+    { fingerprint: 'def' },
+  ]
 })
 
 feed.append({
-  id: 'gv',
-  firstName: 'Gene',
-  lastName: 'Genkaa'
+  id: 'ja',
+  firstName: 'Joe',
+  lastName: 'Abercrombie',
+  keys: [
+    { fingerprint: 'ghi' },
+    { fingerprint: 'jkl' },
+  ]
 })
 
 feed.append({
-  id: 'bsp',
-  firstName: 'Bill',
-  lastName: 'Preston'
+  id: 'ey',
+  firstName: 'Eliezer',
+  lastName: 'Yudkowsky',
+  keys: [
+    { fingerprint: 'mno' },
+    { fingerprint: 'pqr' },
+  ]
 })
 
-feed.append({
-  id: 'ttl',
-  firstName: 'Ted',
-  lastName: 'Logan'
-})
+collect(byFirstName.createReadStream({ gte: 'Joe' }), function (err, results) {
+  console.log('by first name >= Joe:')
+  console.log(results)
+  console.log()
 
-feed.append({
-  id: 'ttl',
-  firstName: 'Teddy',
-  lastName: 'Logan'
-})
+  byFingerprint.findOne({ lt: 'fgh' }, function (err, result) {
+    console.log('first by fingerprint < fgh:')
+    console.log(result)
+    console.log()
 
-feed.append({
-  id: 'ttd',
-  firstName: 'Teddy',
-  lastName: 'Doofus'
+    byLastName.findOne('Yudkowsky', function (err, result) {
+      console.log('by lastName === "Yudkowsky":')
+      console.log(result)
+      console.log()
+    })
+  })
 })

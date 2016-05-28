@@ -158,21 +158,25 @@ module.exports = exports = function createIndexedDB (opts) {
     processor.onLive(() => getOldRow(key, opts, cb))
   }
 
-  function getOldRow (key, opts, cb) {
-    db.get(prefixKey(key, PREFIX.view), opts, cb)
+  function getOldRow (key, cb) {
+    view.get(key, cb)
   }
 
   function indexBy (prop, reduce) {
-    function find (indexVal, cb) {
-      collect(createIndexStream(prop, { eq: indexVal }), function (err, results) {
+    function find (opts, cb) {
+      if (typeof opts !== 'object') {
+        opts = { eq: opts }
+      }
+
+      collect(createIndexStream(prop, opts), function (err, results) {
         if (err) return cb(err)
         if (!results.length) return NotFoundErr()
         cb(null, results)
       })
     }
 
-    function findOne (indexVal, cb) {
-      find(indexVal, function (err, results) {
+    function findOne (opts, cb) {
+      find(opts, function (err, results) {
         if (err) return cb(err)
         cb(null, results[0])
       })
