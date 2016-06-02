@@ -14,14 +14,15 @@ const extend = require('xtend/mutable')
 const clone = require('xtend')
 const SEPARATOR = '!'
 const MAX_CHAR = '\xff'
+const ENTRY_PROP = '_'
 const PREFIX = {
   view: 'v',
   index: 'x'
 }
 
 module.exports = exports = createIndexedDB
-exports.SEPARATOR = SEPARATOR
-exports.merge = merge
+// exports.SEPARATOR = SEPARATOR
+// exports.merge = merge
 
 function createIndexedDB (opts) {
   const feed = opts.feed
@@ -31,6 +32,7 @@ function createIndexedDB (opts) {
 
   const top = opts.db
   const primaryKey = opts.primaryKey || 'key'
+  const entryProp = opts.entryProp || ENTRY_PROP
   const filter = opts.filter || alwaysTrue
   // const custom = opts.custom
   const stateReducer = opts.reduce || mergeReducer
@@ -98,7 +100,7 @@ function createIndexedDB (opts) {
       // we may be in a delete-only op
       if (newState) {
         for (let key in indexReducers) {
-          let iVal = indexReducers[key](newState)
+          let iVal = indexReducers[key](newState, change)
           if (iVal != null) newIndex[key] = iVal
         }
 
@@ -239,19 +241,20 @@ function createIndexedDB (opts) {
     return extend(indexEmitters[prop], {
       find: find,
       findOne: findOne,
-      createReadStream: createReadStream
+      createReadStream: createReadStream,
+      createKeyStream: newKeyStreamCreator(createReadStream),
+      createValueStream: newValueStreamCreator(createReadStream),
     })
   }
 
   function defaultIndexReducer (prop) {
-    return function indexReducer (state) {
+    return function indexReducer (state, change) {
       if (prop in state) {
-        return [
-          state[prop],
-          // inject _entry to preserve order
-          state._entry || 0,
+        return state[prop] + sep +
+          // for identical values,
+          // order by change index in feed
+          change.change + sep +
           getPrimaryKey(state, primaryKey)
-        ].join(sep)
       }
     }
   }
@@ -280,29 +283,63 @@ function createIndexedDB (opts) {
     return SEPARATOR + prefix + SEPARATOR + key
   }
 
+  function logPointerRemover (opts) {
+    return through.obj(function (data, enc, cb) {
+      removeLogPointer(data, opts)
+      cb(null, data)
+    })
+  }
+
+  function removeLogPointer (data, opts) {
+    const val = opts.keys === false ? data :
+      opts.values !== false ? data.value : null
+
+    if (val) delete val[entryProp]
+  }
+
+  function mergeReducer (state, change, cb) {
+    // delete state[primaryKey]
+    cb(null, merge(state, change))
+  }
+
+  function merge (state, change) {
+    const newState = clone(state || {}, change.value || {})
+    if (!state) {
+      if (entryProp in newState) throw new Error(`"${entryProp}" is a reserved property`)
+      newState[entryProp] = change.change
+    }
+
+    return newState
+  }
+
+  function createViewReadStream (opts) {
+    opts = opts || {}
+    extend(opts, wrap(opts, {
+      gt: function (x) {
+        return prefixKey(x || '', PREFIX.view)
+      },
+      lt: function (x) {
+        return prefixKey(x || '', PREFIX.view) + '\xff'
+      }
+    }))
+
+    return pump(
+      upToDateStream(db, processor, opts),
+      unprefixer(PREFIX.view, opts),
+      logPointerRemover(opts)
+    )
+  }
+
   return extend(emitter, {
     separator: sep,
+    merge: merge,
     by: createIndex,
     get: function (key, opts, cb) {
       processor.onLive(() => view.get(key, opts, cb))
     },
-    createReadStream: function (opts) {
-      opts = opts || {}
-      extend(opts, wrap(opts, {
-        gt: function (x) {
-          return prefixKey(x || '', PREFIX.view)
-        },
-        lt: function (x) {
-          return prefixKey(x || '', PREFIX.view) + '\xff'
-        }
-      }))
-
-      return pump(
-        upToDateStream(db, processor, opts),
-        unprefixer(PREFIX.view, opts),
-        logPointerRemover(opts)
-      )
-    }
+    createReadStream: createViewReadStream,
+    createKeyStream: newKeyStreamCreator(createViewReadStream),
+    createValueStream: newValueStreamCreator(createViewReadStream),
   })
 }
 
@@ -334,31 +371,18 @@ function unprefixer (prefix, opts) {
   })
 }
 
-function logPointerRemover (opts) {
-  return through.obj(function (data, enc, cb) {
-    removeLogPointer(data, opts)
-    cb(null, data)
-  })
-}
-
-function removeLogPointer (data, opts) {
-  const val = opts.keys === false ? data :
-    opts.values !== false ? data.value : null
-
-  if (val) delete val._
-}
-
-function mergeReducer (state, change, cb) {
-  // delete state[primaryKey]
-  cb(null, merge(state, change))
-}
-
-function merge (state, change) {
-  const newState = clone(state || {}, change.value || {})
-  if (!state) {
-    if (newState._) throw new Error('"_" is a reserved property')
-    newState._ = change.change
+function newKeyStreamCreator (createReadStream) {
+  return function createKeyStream (opts) {
+    opts = opts || {}
+    opts.values = false
+    return createReadStream(opts)
   }
+}
 
-  return newState
+function newValueStreamCreator (createReadStream) {
+  return function createValueStream (opts) {
+    opts = opts || {}
+    opts.keys = false
+    return createReadStream(opts)
+  }
 }
