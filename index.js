@@ -32,6 +32,7 @@ function createIndexedDB (opts) {
   const top = opts.db
   const primaryKey = opts.primaryKey || 'key'
   const filter = opts.filter || alwaysTrue
+  // const custom = opts.custom
   const stateReducer = opts.reduce || mergeReducer
   const sep = opts.separator || SEPARATOR
   const indexReducers = {}
@@ -56,10 +57,11 @@ function createIndexedDB (opts) {
   const emitter = new EventEmitter()
 
   function worker (change, cb) {
-    change = change.value
-    if (!filter(change)) return cb()
+    // change = change.value
+    const changeVal = change.value
+    if (!filter(changeVal)) return cb()
 
-    const rowKey = getPrimaryKey(change, primaryKey)
+    const rowKey = getPrimaryKey(changeVal, primaryKey)
     // ignore changes that we can't process
     if (rowKey == null) return cb()
 
@@ -91,45 +93,56 @@ function createIndexedDB (opts) {
         }
       })
 
-      const newIndex = {}
-      for (let key in indexReducers) {
-        let iVal = indexReducers[key](newState)
-        if (iVal != null) newIndex[key] = iVal
+      let put
+      let newIndex = {}
+      // we may be in a delete-only op
+      if (newState) {
+        for (let key in indexReducers) {
+          let iVal = indexReducers[key](newState)
+          if (iVal != null) newIndex[key] = iVal
+        }
+
+        put = Object.keys(newIndex)
+          .map(key => {
+            // support multiple generated indices for one prop
+            // e.g. an identity might have multiple keys and want
+            // multiple indices for the `fingerprint` property
+            let vals = newIndex[key]
+            vals = Array.isArray(vals) ? vals : [vals]
+            return vals.map(function (val) {
+              return {
+                type: 'put',
+                key: key + sep + val,
+                // key: defaultIndexReducer(key, newState[key], rowKey),
+                value: rowKey
+              }
+            })
+          })
+          // flatten
+          .reduce(function (flat, next) {
+            return flat.concat(next)
+          }, [])
+          .concat({
+            type: 'put',
+            key: rowIndexKey,
+            value: newIndex
+          })
+
+        const delKeys = del.map(row => row.key)
+        put.forEach(row => {
+          const idx = delKeys.indexOf(row.key)
+          if (idx !== -1) {
+            delKeys.splice(idx, 1)
+          }
+        })
       }
 
-      const put = Object.keys(newIndex)
-        .map(key => {
-          // support multiple generated indices for one prop
-          // e.g. an identity might have multiple keys and want
-          // multiple indices for the `fingerprint` property
-          let vals = newIndex[key]
-          vals = Array.isArray(vals) ? vals : [vals]
-          return vals.map(function (val) {
-            return {
-              type: 'put',
-              key: key + sep + val,
-              // key: defaultIndexReducer(key, newState[key], rowKey),
-              value: rowKey
-            }
-          })
-        })
-        // flatten
-        .reduce(function (flat, next) {
-          return flat.concat(next)
-        }, [])
-
-      const indexBatch = del.concat(put)
-      indexBatch.push({
-        type: 'put',
-        key: rowIndexKey,
-        value: newIndex
-      })
-
+      const indexBatch = del.concat(put || [])
       const batch = prefixKeys(indexBatch, PREFIX.index)
 
       // update view
       batch.push({
-        type: 'put',
+        type: newState ? 'put' : 'del',
         key: prefixKey(rowKey, PREFIX.view),
         value: newState
       })
@@ -155,6 +168,7 @@ function createIndexedDB (opts) {
   function createIndexStream (prop, opts) {
     opts = opts || {}
     if (typeof opts === 'string') opts = { eq: opts, keys: false }
+    else opts = clone(opts)
 
     if ('eq' in opts) {
       opts.lte = opts.gte = opts.eq
@@ -181,6 +195,8 @@ function createIndexedDB (opts) {
 
         getOldRow(data.value, function (err, val) {
           if (err) return cb(err)
+
+          removeLogPointer(val, { keys: false })
           if (!noKeys) val = { key: data.key, value: val }
 
           cb(null, val)
@@ -206,6 +222,7 @@ function createIndexedDB (opts) {
       collect(createReadStream(opts), function (err, results) {
         if (err) return cb(err)
         if (!results.length) return cb(new errors.NotFoundError())
+
         cb(null, results)
       })
     }
@@ -228,9 +245,19 @@ function createIndexedDB (opts) {
 
   function defaultIndexReducer (prop) {
     return function indexReducer (state) {
-      return state[prop] + sep + getPrimaryKey(state, primaryKey)
+      if (prop in state) {
+        return [
+          state[prop],
+          // inject _entry to preserve order
+          state._entry || 0,
+          getPrimaryKey(state, primaryKey)
+        ].join(sep)
+      }
     }
   }
+
+  // function logOrderIndexReducer (prop) {
+  // }
 
   function getPrimaryKey (obj, propOrFn) {
     return typeof propOrFn === 'function' ? propOrFn(obj) : obj[propOrFn]
@@ -272,7 +299,8 @@ function createIndexedDB (opts) {
 
       return pump(
         upToDateStream(db, processor, opts),
-        unprefixer(PREFIX.view, opts)
+        unprefixer(PREFIX.view, opts),
+        logPointerRemover(opts)
       )
     }
   })
@@ -306,11 +334,31 @@ function unprefixer (prefix, opts) {
   })
 }
 
+function logPointerRemover (opts) {
+  return through.obj(function (data, enc, cb) {
+    removeLogPointer(data, opts)
+    cb(null, data)
+  })
+}
+
+function removeLogPointer (data, opts) {
+  const val = opts.keys === false ? data :
+    opts.values !== false ? data.value : null
+
+  if (val) delete val._
+}
+
 function mergeReducer (state, change, cb) {
   // delete state[primaryKey]
   cb(null, merge(state, change))
 }
 
 function merge (state, change) {
-  return clone(state || {}, change || {})
+  const newState = clone(state || {}, change.value || {})
+  if (!state) {
+    if (newState._) throw new Error('"_" is a reserved property')
+    newState._ = change.change
+  }
+
+  return newState
 }
