@@ -67,15 +67,21 @@ function createIndexedDB (opts) {
     // ignore changes that we can't process
     if (rowKey == null) return cb()
 
-    var togo = 2
-    var rowIndexKey = getRowIndexKey(rowKey)
-    var newState
-    var prevIndex
+    let togo = 2
+    const rowIndexKey = getRowIndexKey(rowKey)
+    let newState
+    let oldState
+    let prevIndex
     view.get(rowKey, function (err, state) {
+      oldState = state
       stateReducer(state, change, function (err, _newState) {
         if (err) return cb(err)
 
         newState = _newState
+        if (newState && !(entryProp in newState)) {
+          newState[entryProp] = change.change
+        }
+
         next()
       })
     })
@@ -146,7 +152,7 @@ function createIndexedDB (opts) {
       batch.push({
         type: newState ? 'put' : 'del',
         key: prefixKey(rowKey, PREFIX.view),
-        value: newState
+        value: newState || oldState
       })
 
       db.batch(batch, function (err) {
@@ -155,7 +161,7 @@ function createIndexedDB (opts) {
         cb()
 
         // announce changes
-        emitter.emit('change', change, newState)
+        emitter.emit('change', change, newState, oldState)
         for (let prop in newIndex) {
           indexEmitters[prop].emit('change', change, newIndex[prop])
         }
@@ -198,7 +204,7 @@ function createIndexedDB (opts) {
         getOldRow(data.value, function (err, val) {
           if (err) return cb(err)
 
-          removeLogPointer(val, { keys: false })
+          // removeLogPointer(val, { keys: false })
           if (!noKeys) val = { key: data.key, value: val }
 
           cb(null, val)
@@ -283,19 +289,19 @@ function createIndexedDB (opts) {
     return SEPARATOR + prefix + SEPARATOR + key
   }
 
-  function logPointerRemover (opts) {
-    return through.obj(function (data, enc, cb) {
-      removeLogPointer(data, opts)
-      cb(null, data)
-    })
-  }
+  // function logPointerRemover (opts) {
+  //   return through.obj(function (data, enc, cb) {
+  //     removeLogPointer(data, opts)
+  //     cb(null, data)
+  //   })
+  // }
 
-  function removeLogPointer (data, opts) {
-    const val = opts.keys === false ? data :
-      opts.values !== false ? data.value : null
+  // function removeLogPointer (data, opts) {
+  //   const val = opts.keys === false ? data :
+  //     opts.values !== false ? data.value : null
 
-    if (val) delete val[entryProp]
-  }
+  //   if (val) delete val[entryProp]
+  // }
 
   function mergeReducer (state, change, cb) {
     // delete state[primaryKey]
@@ -325,8 +331,8 @@ function createIndexedDB (opts) {
 
     return pump(
       upToDateStream(db, processor, opts),
-      unprefixer(PREFIX.view, opts),
-      logPointerRemover(opts)
+      unprefixer(PREFIX.view, opts)
+      // logPointerRemover(opts)
     )
   }
 

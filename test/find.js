@@ -8,10 +8,12 @@ test('find', function(t) {
 
   var db = nextDB()
   var feed = changes(nextDB())
+  var entryProp = '_'
   var indexed = indexer({
     primaryKey: 'id',
     db: db,
-    feed: feed
+    feed: feed,
+    entryProp: entryProp
   })
 
   var byTitle = indexed.by('title')
@@ -41,11 +43,13 @@ test('find', function(t) {
 
   byTitle.findOne('a title', function(err, result) {
     t.error(err)
+    delete result[entryProp]
     t.deepEqual(result, posts[0])
   })
 
   byTitle.find('a title', function(err, results) {
     t.error(err)
+    results.forEach(r => delete r[entryProp])
     t.deepEqual(results, posts.slice(0, 2))
   })
 })

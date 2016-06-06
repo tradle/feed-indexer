@@ -3,6 +3,7 @@ var collect = require('stream-collector')
 var changes = require('changes-feed')
 var nextDB = require('./helpers').nextDB
 var indexer = require('..')
+var entryProp = '_'
 
 test('view', function(t) {
   t.plan(1)
@@ -12,7 +13,8 @@ test('view', function(t) {
   var indexed = indexer({
     primaryKey: 'id',
     db: db,
-    feed: feed
+    feed: feed,
+    entryProp: entryProp
   })
 
   var posts = [
@@ -38,6 +40,7 @@ test('view', function(t) {
   collect(indexed.createReadStream({ keys: false }), function (err, results) {
     if (err) throw err
 
+    results.forEach(r => delete r[entryProp])
     t.same(results, [posts[2], posts[1]])
   })
 })

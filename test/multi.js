@@ -8,10 +8,12 @@ test('multi', function(t) {
 
   var db = nextDB()
   var feed = changes(nextDB())
+  var entryProp = '_'
   var indexed = indexer({
     primaryKey: 'id',
     db: db,
-    feed: feed
+    feed: feed,
+    entryProp: entryProp
   })
 
   var byFingerprint = indexed.by('fingerprint', function (val) {
@@ -33,6 +35,7 @@ test('multi', function(t) {
   ;['a', 'b'].forEach(finger => {
     byFingerprint.findOne(finger, function(err, result) {
       t.error(err)
+      delete result[entryProp]
       t.deepEqual(result, identity)
     })
   })

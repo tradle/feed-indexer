@@ -2,6 +2,7 @@ var test = require('tape')
 var changes = require('changes-feed')
 var nextDB = require('./helpers').nextDB
 var indexer = require('..')
+var entryProp = '_'
 
 test('stream', function(t) {
   t.plan(2)
@@ -11,7 +12,8 @@ test('stream', function(t) {
   var indexed = indexer({
     primaryKey: 'id',
     db: db,
-    feed: feed
+    feed: feed,
+    entryProp: '_'
   })
 
   var byTitle = indexed.by('title')
@@ -33,6 +35,7 @@ test('stream', function(t) {
     keys: false
   })
   .on('data', function(data) {
+    delete data[entryProp]
     t.deepEqual(data, post)
   })
 
@@ -45,7 +48,7 @@ test('stream', function(t) {
   .on('end', t.pass)
 })
 
-test.only('feed order', function(t) {
+test('feed order', function(t) {
   t.plan(2)
 
   var db = nextDB()
@@ -53,7 +56,8 @@ test.only('feed order', function(t) {
   var indexed = indexer({
     primaryKey: 'id',
     db: db,
-    feed: feed
+    feed: feed,
+    entryProp: entryProp
   })
 
   var byTitle = indexed.by('title')
@@ -74,6 +78,7 @@ test.only('feed order', function(t) {
 
   byTitle.createValueStream()
   .on('data', function(data) {
+    delete data[entryProp]
     t.deepEqual(data, posts.shift())
   })
 })
