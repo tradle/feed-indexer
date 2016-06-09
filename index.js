@@ -371,6 +371,7 @@ function unprefixer (prefix, opts) {
     if (opts.values === false) return cb(null, data.slice(prefix.length))
 
     cb(null, {
+      type: data.type,
       key: data.key.slice(prefix.length),
       value: data.value
     })
