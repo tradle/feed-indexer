@@ -95,7 +95,7 @@ function createIndexedDB (opts) {
     function next () {
       if (--togo) return
 
-      const del = Object.keys(prevIndex).map(key => {
+      let del = Object.keys(prevIndex).map(key => {
         return {
           type: 'del',
           key: key + sep + prevIndex[key]
@@ -137,12 +137,10 @@ function createIndexedDB (opts) {
             value: newIndex
           })
 
-        const delKeys = del.map(row => row.key)
-        put.forEach(row => {
-          const idx = delKeys.indexOf(row.key)
-          if (idx !== -1) {
-            delKeys.splice(idx, 1)
-          }
+        del = del.filter(delRow => {
+          return put.every(putRow => {
+            return putRow.key !== delRow.key
+          })
         })
       }
 
