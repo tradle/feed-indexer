@@ -13,6 +13,7 @@
     "level-errors": "^1.0.4",
     "level-live-stream": "^1.4.11",
     "level-option-wrap": "^1.1.0",
+    "lexicographic-integer": "^1.1.0",
     "pump": "^1.0.1",
     "readable-stream": "^2.1.4",
     "stream-collector": "^1.0.1",

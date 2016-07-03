@@ -12,6 +12,7 @@ const errors = require('level-errors')
 const through = require('through2')
 const extend = require('xtend/mutable')
 const clone = require('xtend')
+const lexint = require('lexicographic-integer')
 const SEPARATOR = '!'
 const MAX_CHAR = '\xff'
 const ENTRY_PROP = '_'
@@ -259,7 +260,7 @@ function createIndexedDB (opts) {
         return state[prop] + sep +
           // for identical values,
           // order by change index in feed
-          change.change + sep +
+          lexint.pack(change.change, 'hex') + sep +
           getPrimaryKey(state, primaryKey)
       }
     }
