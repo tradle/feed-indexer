@@ -336,6 +336,7 @@ function createIndexedDB (opts) {
   }
 
   return extend(emitter, {
+    onLive: cb => processor.onLive(cb),
     separator: sep,
     merge: merge,
     by: createIndex,
