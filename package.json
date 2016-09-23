@@ -1,6 +1,6 @@
 {
   "name": "feed-indexer",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "build a view and custom indices on a changes-feed",
   "main": "index.js",
   "scripts": {
