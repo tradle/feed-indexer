@@ -173,9 +173,7 @@ function createIndexedDB (opts) {
   }
 
   function createIndexStream (prop, opts) {
-    opts = opts || {}
-    if (typeof opts === 'string') opts = { eq: opts, keys: false }
-    else opts = clone(opts)
+    opts = normalizeOpts(opts)
 
     if ('eq' in opts) {
       opts.lte = opts.gte = opts.eq
@@ -235,6 +233,8 @@ function createIndexedDB (opts) {
     }
 
     function findOne (opts, cb) {
+      opts = normalizeOpts(opts)
+      opts.limit = 1
       find(opts, function (err, results) {
         if (err) return cb(err)
         cb(null, results[0])
@@ -392,4 +392,12 @@ function newValueStreamCreator (createReadStream) {
     opts.keys = false
     return createReadStream(opts)
   }
+}
+
+function normalizeOpts (opts) {
+  if (typeof opts === 'string') {
+    return { eq: opts, keys: false }
+  }
+
+  return opts ? clone(opts) : {}
 }
