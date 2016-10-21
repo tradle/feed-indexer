@@ -35,6 +35,7 @@ function createIndexedDB (opts) {
   const primaryKey = opts.primaryKey || 'key'
   const entryProp = opts.entryProp || ENTRY_PROP
   const filter = opts.filter || alwaysTrue
+  const preprocess = opts.preprocess
   // const custom = opts.custom
   const stateReducer = opts.reduce || mergeReducer
   const sep = opts.separator || SEPARATOR
@@ -61,6 +62,16 @@ function createIndexedDB (opts) {
 
   function worker (change, cb) {
     // change = change.value
+    if (!preprocess) return workerHelper(change, cb)
+
+    preprocess(change, function (err, processed) {
+      if (err) return cb(err)
+
+      workerHelper(processed || change, cb)
+    })
+  }
+
+  function workerHelper (change, cb) {
     const changeVal = change.value
     if (!filter(changeVal)) return cb()
 

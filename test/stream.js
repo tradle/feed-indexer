@@ -82,3 +82,29 @@ test('feed order', function(t) {
     t.deepEqual(data, posts.shift())
   })
 })
+
+test('preprocess', function (t) {
+  var db = nextDB()
+  var feed = changes(nextDB())
+  var indexed = indexer({
+    primaryKey: 'preprocessed',
+    db: db,
+    feed: feed,
+    entryProp: entryProp,
+    preprocess: function (change, cb) {
+      process.nextTick(function () {
+        change.value.preprocessed = change.change
+        cb(null, change)
+      })
+    },
+    reduce: function (state, change) {
+      t.equal(change.value.preprocessed, change.change)
+      t.end()
+      return change.value
+    }
+  })
+
+  feed.append({
+    id: 'dumb'
+  })
+})
