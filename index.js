@@ -66,8 +66,9 @@ function createIndexedDB (opts) {
 
     preprocess(change, function (err, processed) {
       if (err) return cb(err)
+      if (!processed) return cb() // skip
 
-      workerHelper(processed || change, cb)
+      workerHelper(processed, cb)
     })
   }
 
