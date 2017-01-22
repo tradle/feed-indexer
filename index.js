@@ -238,7 +238,7 @@ function createIndexedDB (opts) {
     function find (opts, cb) {
       collect(createReadStream(opts), function (err, results) {
         if (err) return cb(err)
-        if (!results.length) return cb(new errors.NotFoundError())
+        if (!results.length) return cb(new errors.NotFoundError('no matches'))
 
         cb(null, results)
       })
