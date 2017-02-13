@@ -382,11 +382,14 @@ function unprefixer (prefix, opts) {
     if (opts.keys === false) return cb(null, data)
     if (opts.values === false) return cb(null, data.slice(prefix.length))
 
-    cb(null, {
-      type: data.type,
+    const unprefixed = {
       key: data.key.slice(prefix.length),
       value: data.value
-    })
+    }
+
+    if (data.type) unprefixed.type = data.type
+
+    cb(null, unprefixed)
   })
 }
 
