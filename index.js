@@ -203,6 +203,10 @@ function createIndexedDB (opts) {
       }
     }))
 
+    if (opts.rawIndex) {
+      return upToDateStream(db, processor, opts)
+    }
+
     const noKeys = opts.keys === false
     opts.keys = opts.values = true
     return pump(
