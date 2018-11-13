@@ -351,11 +351,16 @@ function createIndexedDB (opts) {
     )
   }
 
+  function del (key, cb) {
+    db.del(key, cb)
+  }
+
   return extend(emitter, {
     onLive: cb => processor.onLive(cb),
     separator: sep,
     merge: merge,
     by: createIndex,
+    del,
     get: function (key, opts, cb) {
       processor.onLive(() => view.get(key, opts, cb))
     },
